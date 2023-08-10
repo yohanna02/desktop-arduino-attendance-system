@@ -1,13 +1,15 @@
 const { app, BrowserWindow, Menu, ipcMain } = require("electron");
 const path = require("path");
 const mongoose = require("mongoose");
-const { SerialPort } = require("serialport");
+const webSocket = require("ws");
 
 const adminModel = require("../model/adminModel.js");
 const classModel = require("../model/classModel.js");
+const studentModel = require("../model/studentModel.js");
 const sendMail = require("./sendMail.js");
+const fingerModel = require("../model/fingerModel.js");
 
-let loggedIn = true;
+let loggedIn = false;
 let currentClassId = null;
 let fingerprintId = null;
 
@@ -26,41 +28,6 @@ const template = [
   },
 ];
 
-let timer = null;
-const checkForFingerprintDevice = async () => {
-  const _port = await SerialPort.list();
-  const connect = _port.find((p) => {
-    return p.vendorId === "1a86" && p.productId === "7523";
-  });
-
-  if (connect) {
-    clearInterval(timer);
-    port = new SerialPort(
-      {
-        path: connect.path,
-        baudRate: 115200,
-      },
-      (err) => {
-        if (err) {
-          console.log(err);
-          parent.webContents.send("msg", "Error connecting to fingerprint");
-          return;
-        }
-
-        template[2].label = "Fingerprint Connected";
-        const menu = Menu.buildFromTemplate(template);
-        Menu.setApplicationMenu(menu);
-      }
-    );
-
-    port.on("data", (data) => {
-      child2.webContents.send("enroll-res", data.toString());
-    });
-  }
-};
-
-timer = setInterval(checkForFingerprintDevice, 2000);
-
 const menu = Menu.buildFromTemplate(template);
 Menu.setApplicationMenu(menu);
 
@@ -70,7 +37,25 @@ mongoose.connect("mongodb://localhost/attendance-system", {
 
 let parent;
 let child;
-let child2;
+
+const socketClient = new webSocket("ws://localhost:3000");
+
+socketClient.on("open", () => {
+  console.log("Conneced Web socket");
+
+  socketClient.send(JSON.stringify({
+    event: "set-device",
+    device: "desktop"
+  }));
+
+  socketClient.on("message", (rawData) => {
+    const data = JSON.parse(rawData.toString());
+
+    if (data.event === "enroll") {
+      child.webContents.send("enroll-id", data.id);
+    }
+  })
+});
 
 const db = mongoose.connection;
 db.once("open", () => {
@@ -175,6 +160,8 @@ ipcMain.handle("fetchClass", async () => {
       };
     }
     const classes = await classModel.find();
+
+    console.log(classes);
     return {
       success: true,
       classes: JSON.stringify(classes),
@@ -211,51 +198,54 @@ ipcMain.handle("studentData", async () => {
     };
   }
   const _class = await classModel.findById(currentClassId);
+  const students = await studentModel.find({_id: {
+    $in: _class.studentsIds
+  }});
   return {
     success: true,
     class: _class.name,
-    students: JSON.stringify(_class.students),
+    students: JSON.stringify(students),
   };
 });
 
-ipcMain.on("openEnroll", (event, printId) => {
-  child2 = createWindow(
-    {
-      width: 400,
-      height: 500,
-      parent: child,
-      modal: true,
-      menu: null,
-      webPreferences: {
-        preload: path.join(__dirname, "preload.js"),
-      },
-    },
-    path.join(__dirname, "../views/finger.html")
-  );
-  fingerprintId = printId;
-});
-
-ipcMain.on("enroll", () => {
-  classModel
-    .findOne({ _id: currentClassId, "students.fingerprintId": fingerprintId })
-    .then((exist) => {
-      if (exist) {
-        parent.webContents.send("msg", "Fingerprint Id in use");
+ipcMain.on("add-student", (event, data) => {
+  const addStudent = async () => {
+    try {
+      const _class = await classModel.findById(currentClassId);
+      if (!_class) {
+        parent.webContents.send("msg", "Invalid class Id");
         return;
       }
 
-      port.write(`enroll:${fingerprintId}`, (err) => {
-        if (err) {
-          console.log(err);
-          parent.webContents.send("msg", "Error trying to enroll student");
-          return;
-        }
+      const student = await studentModel.findOne({fingerprintId: data.fingerprintId});
+      if (student) {
+        parent.webContents.send("msg", "Fingerprint ID already in use");
+        return;
+      }
+      const newStudent = new studentModel({
+        name: data.name,
+        regNo: data.regNo,
+        parentEmail: data.parentEmail,
+        fingerprintId: data.fingerprintId
       });
-    });
-});
 
-ipcMain.on("add-student", (event, data) => {
-  classModel
+      const saved = await newStudent.save();
+
+      _class.studentsIds.push(saved._id);
+      await _class.save();
+
+      await fingerModel.create({
+        fingerprintId: data.fingerprintId
+      });
+
+      parent.webContents.send("msg", "Added new student");
+    } catch (err) {
+      console.log(err);
+      parent.webContents.send("msg", "An error occured while adding student");
+    }
+  }
+  addStudent();
+  /*classModel
     .findById(currentClassId)
     .then((_class) => {
       if (!_class) {
@@ -263,15 +253,41 @@ ipcMain.on("add-student", (event, data) => {
         return;
       }
 
-      _class.students.push(data);
-      return _class.save();
+      return _class;
+      // _class.students.push(data);
+      // return _class.save();
     })
-    .then(() => {
-      parent.webContents.send("msg", "Added new student");
+    .then((_class) => {
+      studentModel.find({fingerprintId: data.fingerprintId})
     })
-    .catch(() => {
+    .then((_class) => {
+      if (_class) {
+        const newStudent = new studentModel({
+          name: data.name,
+          regNo: data.regNo,
+          parentEmail: data.parentEmail,
+          fingerprintId: data.fingerprintId
+        });
+
+        return {student: newStudent.save(), _class};
+      }
+    })
+    .then(({student, _class}) => {
+      if (student) {
+        console.log(_class);
+        _class.studentIds.push(student._id);
+        return _class.save();
+      }
+    })
+    .then((saved) => {
+      if (saved) {
+        parent.webContents.send("msg", "Added new student");
+      }
+    })
+    .catch((err) => {
+      console.log(err);
       parent.webContents.send("msg", "An error occured while adding student");
-    });
+    });*/
 });
 
 ipcMain.on("make-attendance", (event, classId) => {
@@ -306,92 +322,55 @@ ipcMain.on("make-attendance", (event, classId) => {
 });
 
 ipcMain.on("close-attendance", (event, classId) => {
-  classModel
-    .findOne({ _id: classId, "attendance.open": true })
-    .then((_class) => {
+  const closeAttendance = async () => {
+    try {
+      const _class = await classModel.findOne({ _id: classId, "attendance.open": true });
       if (!_class) {
         parent.webContents.send("msg", "Attendance is not open");
-        return null;
+        return;
       }
-
       const len = _class.attendance.length;
       let absent = [];
       for (let i = 0; i < len; i++) {
         if (_class.attendance[i].open) {
-          absent = _class.students
+          absent = _class.studentsIds
             .filter(
-              (student) =>
-                _class.attendance[i].studentIds.indexOf(student.id) === -1
+              (studentId) =>
+                _class.attendance[i].studentIds.indexOf(studentId) === -1
             )
-            .map((student) => student.parentEmail);
           _class.attendance[i].open = false;
           break;
         }
       }
+      await _class.save();
+
+      const absentStudentParentEmail = await studentModel.find({_id: {
+        $in: absent
+      }}).select("parentEmail");
+      
+      const mappedAbsentStudentParentEmail = absentStudentParentEmail.map(student => student.parentEmail);
 
       const html = `
-     <p>Dear Parent</p>
-     <p>Your child was absent for his/her ${_class.name} today?</p>
-    `;
-      sendMail(absent, "Absent Resport", html);
-
-      return _class.save();
-    })
-    .then((saved) => {
-      if (saved) {
-        parent.webContents.send("msg", "Attendance closed successfully");
-      }
-    })
-    .catch((err) => {
+      <p>Dear Parent</p>
+      <p>Your child was absent for his/her ${_class.name} today?</p>
+      `;
+      await sendMail(mappedAbsentStudentParentEmail, "Absent Resport", html);
+      parent.webContents.send("msg", "Attendance closed successfully");
+    } catch (err) {
       console.log(err);
       parent.webContents.send("msg", "Error closing attendance");
-    });
-});
-
-ipcMain.on("take-attendance", (event, studentId) => {
-  classModel
-    .findOne({
-      _id: currentClassId,
-      "students._id": studentId,
-      "attendance.open": true,
-    })
-    .then((_class) => {
-      if (!_class) {
-        parent.webContents.send("msg", "No avaliable attendance");
-        return;
-      }
-
-      const len = _class.attendance.length;
-      for (let i = 0; i < len; i++) {
-        if (
-          _class.attendance[i].open &&
-          !_class.attendance[i].studentIds.includes(studentId)
-        ) {
-          _class.attendance[i].studentIds.push(studentId);
-          return _class.save();
-        }
-      }
-
-      return null;
-    })
-    .then((saved) => {
-      if (saved) {
-        parent.webContents.send("msg", "Attendance Taken");
-        return;
-      }
-
-      parent.webContents.send("msg", "Attendance Already Taken");
-    })
-    .catch(() => {
-      parent.webContents.send("msg", "Error taking attendance");
-    });
+    }
+  }
+  closeAttendance();
 });
 
 ipcMain.handle("view-attendance", async (event, studentId) => {
   try {
     const _class = await classModel.findOne({
       _id: currentClassId,
-      "students._id": studentId,
+      studentsIds: {
+        $in: studentId
+      },
     });
 
     if (!_class) {

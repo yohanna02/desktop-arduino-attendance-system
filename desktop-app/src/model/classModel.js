@@ -2,18 +2,15 @@ const mongoose = require("mongoose");
 
 const schema = new mongoose.Schema({
     name: String,
-    students: [
-        new mongoose.Schema({
-            name: String,
-            regNo: String,
-            parentEmail: String,
-            fingerprintId: Number
-        })
-    ],
+    studentsIds: [mongoose.Schema.Types.ObjectId],
     attendance: [
         new mongoose.Schema({
             open: Boolean,
-            studentIds: [mongoose.Schema.Types.ObjectId]
+            studentIds: [mongoose.Schema.Types.ObjectId],
+            date: {
+                type: Date,
+                default: new Date()
+            }
         })
     ]
 });

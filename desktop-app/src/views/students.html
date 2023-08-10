@@ -20,7 +20,6 @@
           <th scope="col">Registration No</th>
           <th scope="col">Parent Email</th>
           <th scope="col"></th>
-          <th scope="col"></th>
         </tr>
       </thead>
       <tbody id="table-body"></tbody>
@@ -50,12 +49,11 @@
               </div>
               <div class="form-group">
                 <label for="fingerId">Fingerprint ID</label>
-                <input type="number" id="fingerId" class="form-control">
+                <input type="number" disabled id="fingerId" class="form-control">
               </div>
             </form>
           </div>
           <div class="modal-footer">
-            <button id="enroll-finger" type="button" class="btn btn-outline-danger">Enroll Finger</button>
             <button id="save" type="button" class="btn btn-success">Save changes</button>
           </div>
         </div>
@@ -65,16 +63,7 @@
     <script defer src="../lib/bootstrap.min.js"></script>
     <script>
       window.api.studentData();
-
-      document.querySelector("#enroll-finger").addEventListener("click", (e) => {
-        const fingerprintId = parseInt(document.querySelector("#fingerId").value);
-
-        if (isNaN(fingerprintId)) {
-          alert("Please enter a fingerprint Id");
-          return;
-        }
-        window.api.openEnroll(fingerprintId);
-      });
+      window.api.enrollId();
 
       document.querySelector("#save").addEventListener("click", (e) => {
         const name = document.querySelector("#name").value.trim();
@@ -99,9 +88,6 @@
           const studentId = e.target.dataset.id;
           if (e.target.tagName === "BUTTON" && e.target.dataset.type === "view attendance") {
               window.api.viewAttendance(studentId);
-          }
-          else if (e.target.tagName === "BUTTON" && e.target.dataset.type === "take attendance") {
-            window.api.takeAttendance(studentId);
           }
       });
       

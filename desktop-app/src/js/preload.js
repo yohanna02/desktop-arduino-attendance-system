@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld("api", {
           <tr>
             <th scope="row">${idx + 1}</th>
             <td>${_class.name}</td>
-            <td>${_class.students.length}</td>
+            <td>${_class.studentsIds.length}</td>
             <td><button class="btn btn-primary" data-type="view students" data-classid="${
               _class._id
             }">View Students</button></td>
@@ -81,9 +81,6 @@ contextBridge.exposeInMainWorld("api", {
             <td><button class="btn btn-primary" data-type="view attendance" data-id="${
               student._id
             }">View Attendances</button></td>
-            <td><button class="btn btn-primary" data-type="take attendance" data-id="${
-              student._id
-            }">Take Attendance</button></td>
           </tr>
         `;
 
@@ -95,17 +92,6 @@ contextBridge.exposeInMainWorld("api", {
         alert("Error Fetching Student List");
       });
   },
-  openEnroll: (fingerprintId) => {
-    ipcRenderer.send("openEnroll", fingerprintId);
-  },
-  enroll: () => {
-    ipcRenderer.send("enroll");
-  },
-  enrollRes: () => {
-    ipcRenderer.on("enroll-res", (event, data) => {
-      document.querySelector("#response").textContent = data;
-    });
-  },
   addNewStudent: (data) => {
     ipcRenderer.send("add-student", data);
   },
@@ -115,14 +101,19 @@ contextBridge.exposeInMainWorld("api", {
   closeAttendance: (classId) => {
     ipcRenderer.send("close-attendance", classId);
   },
-  takeAttendance: (studentId) => {
-    ipcRenderer.send("take-attendance", studentId);
-  },
+  // takeAttendance: (studentId) => {
+  //   ipcRenderer.send("take-attendance", studentId);
+  // },
   viewAttendance: (studentId) => {
     ipcRenderer.invoke("view-attendance", studentId).then(data => {
       if (data.success) {
         alert(`Total class: ${data.totalAttendance}, Class Taken: ${data.classAttended}`);
       }
+    });
+  },
+  enrollId: () => {
+    ipcRenderer.on("enroll-id", (event, id) => {
+      document.querySelector("#fingerId").value = id;
     });
   }
 });
