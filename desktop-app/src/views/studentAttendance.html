@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Attendance</title>
+    <link rel="stylesheet" href="../lib/bootstrap.min.css" />
+  </head>
+  <body>
+    <button type="button" class="btn btn-primary">Print</button>
+    <p>Name: <b id="name"></b></p>
+    <p>Registration no: <b id="regNo"></b></p>
+    <p>Class Name: <b id="className"></b></p>
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">Date</th>
+          <th scope="col">Attended</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+
+    <script>
+        window.api.viewAttendance();
+        window.api.msg();
+
+        const btn = document.querySelector("button");
+        btn.addEventListener("click", () => {
+            window.api.print();
+        });
+    </script>
+  </body>
+</html>
