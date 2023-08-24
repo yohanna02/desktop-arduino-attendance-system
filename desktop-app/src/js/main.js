@@ -2,6 +2,8 @@ const { app, BrowserWindow, Menu, ipcMain } = require("electron");
 const path = require("path");
 const mongoose = require("mongoose");
 const webSocket = require("ws");
+const fs = require("fs");
+const os = require("os");
 
 const adminModel = require("../model/adminModel.js");
 const classModel = require("../model/classModel.js");
@@ -11,6 +13,7 @@ const fingerModel = require("../model/fingerModel.js");
 
 let loggedIn = false;
 let currentClassId = null;
+let currentStudentId = null;
 let fingerprintId = null;
 
 let port = null;
@@ -31,12 +34,13 @@ const template = [
 const menu = Menu.buildFromTemplate(template);
 Menu.setApplicationMenu(menu);
 
-mongoose.connect("mongodb://localhost/attendance-system", {
+mongoose.connect("mongodb://localhost:27017/attendance-system", {
   useNewUrlParser: true,
 });
 
 let parent;
 let child;
+let studentAttendanceWindow;
 
 const socketClient = new webSocket("ws://localhost:3000");
 
@@ -160,8 +164,6 @@ ipcMain.handle("fetchClass", async () => {
       };
     }
     const classes = await classModel.find();
-
-    console.log(classes);
     return {
       success: true,
       classes: JSON.stringify(classes),
@@ -201,10 +203,39 @@ ipcMain.handle("studentData", async () => {
   const students = await studentModel.find({_id: {
     $in: _class.studentsIds
   }});
+
+  const newData = students.map(async (student) => {
+    const _class = await classModel.findOne({
+      _id: currentClassId,
+      studentsIds: {
+        $in: student.id
+      }
+    });
+
+    const len = _class.attendance.length;
+    let classAttended = 0;
+    for (let i = 0; i < len; i++) {
+      if (_class.attendance[i].studentIds.includes(student.id)) {
+        classAttended++;
+      }
+    }
+    let myStudent = JSON.stringify(student);
+    myStudent = JSON.parse(myStudent);
+    const data = {
+      ...myStudent,
+      totalAttendance: len,
+      classAttended
+    }
+    return data;
+  });
+
+  const resolve = await Promise.all(newData);
+
+
   return {
     success: true,
     class: _class.name,
-    students: JSON.stringify(students),
+    students: JSON.stringify(resolve),
   };
 });
 
@@ -240,54 +271,10 @@ ipcMain.on("add-student", (event, data) => {
 
       parent.webContents.send("msg", "Added new student");
     } catch (err) {
-      console.log(err);
       parent.webContents.send("msg", "An error occured while adding student");
     }
   }
   addStudent();
-  /*classModel
-    .findById(currentClassId)
-    .then((_class) => {
-      if (!_class) {
-        parent.webContents.send("msg", "Invalid class Id");
-        return;
-      }
-
-      return _class;
-      // _class.students.push(data);
-      // return _class.save();
-    })
-    .then((_class) => {
-      studentModel.find({fingerprintId: data.fingerprintId})
-    })
-    .then((_class) => {
-      if (_class) {
-        const newStudent = new studentModel({
-          name: data.name,
-          regNo: data.regNo,
-          parentEmail: data.parentEmail,
-          fingerprintId: data.fingerprintId
-        });
-
-        return {student: newStudent.save(), _class};
-      }
-    })
-    .then(({student, _class}) => {
-      if (student) {
-        console.log(_class);
-        _class.studentIds.push(student._id);
-        return _class.save();
-      }
-    })
-    .then((saved) => {
-      if (saved) {
-        parent.webContents.send("msg", "Added new student");
-      }
-    })
-    .catch((err) => {
-      console.log(err);
-      parent.webContents.send("msg", "An error occured while adding student");
-    });*/
 });
 
 ipcMain.on("make-attendance", (event, classId) => {
@@ -357,41 +344,64 @@ ipcMain.on("close-attendance", (event, classId) => {
       await sendMail(mappedAbsentStudentParentEmail, "Absent Resport", html);
       parent.webContents.send("msg", "Attendance closed successfully");
     } catch (err) {
-      console.log(err);
       parent.webContents.send("msg", "Error closing attendance");
     }
   }
   closeAttendance();
 });
 
-ipcMain.handle("view-attendance", async (event, studentId) => {
+ipcMain.on("open-student-attendance", (event, studentId) => {
+  currentStudentId = studentId;
+  studentAttendanceWindow = createWindow(
+    {
+      width: 800,
+      height: 600,
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+      },
+      modal: true,
+      parent: child
+    },
+    path.join(__dirname, "../views/studentAttendance.html")
+  );
+});
+
+ipcMain.handle("view-attendance", async (event) => {
   try {
     const _class = await classModel.findOne({
       _id: currentClassId,
       studentsIds: {
-        $in: studentId
+        $in: currentStudentId
       },
     });
 
-    if (!_class) {
-      return {
-        success: false,
-        msg: "Invalid class Id"
-      };
-    }
+    const student = await studentModel.findById(currentStudentId);
 
-    const len = _class.attendance.length;
-    let classAttended = 0;
-    for (let i = 0; i < len; i++) {
-      if (_class.attendance[i].studentIds.includes(studentId)) {
-        classAttended++;
+    // const attendance = _class.studentsIds.map(async (student) => {
+    let totalAttendance = [];
+    _class.attendance.forEach(attendance => {
+      if (attendance.studentIds.includes(currentStudentId)) {
+        totalAttendance.push({
+          date: attendance.date,
+          present: true
+        });
       }
-    }
+      else {
+        totalAttendance.push({
+          date: attendance.date,
+          present: false
+        });
+      }
+    });
+    
+    let myStudent = JSON.stringify(student);
+    myStudent = JSON.parse(myStudent);
 
     return {
       success: true,
-      totalAttendance: len,
-      classAttended
+      className: _class.name,
+      ...myStudent,
+      totalAttendance
     };
   } catch (err) {
     return {
@@ -399,4 +409,19 @@ ipcMain.handle("view-attendance", async (event, studentId) => {
       msg: "Error fetching Attendance"
     }
   }
+});
+
+ipcMain.on("print-page", (event) => {
+  const pdfPath = path.join(os.homedir(), "Desktop", "attendance.pdf");
+  studentAttendanceWindow.webContents.printToPDF({}).then(data => {
+    fs.writeFile(pdfPath, data, (error) => {
+      if (error) {
+        studentAttendanceWindow.webContents.send("msg", "Failed to write PDF");
+        return;
+      };
+      studentAttendanceWindow.webContents.send("msg", "File saved");
+    });
+  }).catch(error => {
+    studentAttendanceWindow.webContents.send("msg", "Failed to write PDF");
+  });
 });

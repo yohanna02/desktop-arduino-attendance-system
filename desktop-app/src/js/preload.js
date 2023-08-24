@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, BrowserWindow } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   login: (data) => {
@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld("api", {
             <td>${student.name}</td>
             <td>${student.regNo}</td>
             <td>${student.parentEmail}</td>
+            <td>${student.classAttended}/${student.totalAttendance}</td>
             <td><button class="btn btn-primary" data-type="view attendance" data-id="${
               student._id
             }">View Attendances</button></td>
@@ -104,16 +105,47 @@ contextBridge.exposeInMainWorld("api", {
   // takeAttendance: (studentId) => {
   //   ipcRenderer.send("take-attendance", studentId);
   // },
-  viewAttendance: (studentId) => {
-    ipcRenderer.invoke("view-attendance", studentId).then(data => {
+  openAttendance: (studentId) => {
+    ipcRenderer.send("open-student-attendance", studentId);
+  },
+  viewAttendance: () => {
+    ipcRenderer.invoke("view-attendance").then((data) => {
       if (data.success) {
-        alert(`Total class: ${data.totalAttendance}, Class Taken: ${data.classAttended}`);
+        const nameField = document.querySelector("#name");
+        const regNoField = document.querySelector("#regNo");
+        const classNameField = document.querySelector("#className");
+        const tableBody = document.querySelector("#table-body");
+
+        nameField.textContent = data.name;
+        regNoField.textContent = data.regNo;
+        classNameField.textContent = data.className;
+
+        data.totalAttendance.forEach((attendance, idx) => {
+          const date = new Date(attendance.date);
+          const dateString = date.toLocaleString("en-NG", {
+            dateStyle: "medium",
+            timeStyle: "short"
+          });
+          const attended = attendance.present ? "Present" : "Absent";
+          const html = `
+          <tr>
+            <th scope="row">${idx + 1}</th>
+            <td>${dateString}</td>
+            <td>${attended}</td>
+          </tr>
+        `;
+
+          tableBody.innerHTML += html;
+        });
       }
     });
+  },
+  print: () => {
+    ipcRenderer.send("print-page");
   },
   enrollId: () => {
     ipcRenderer.on("enroll-id", (event, id) => {
       document.querySelector("#fingerId").value = id;
     });
-  }
+  },
 });

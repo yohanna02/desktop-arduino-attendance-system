@@ -19,6 +19,7 @@
           <th scope="col">Name</th>
           <th scope="col">Registration No</th>
           <th scope="col">Parent Email</th>
+          <th scope="col">Attendance</th>
           <th scope="col"></th>
         </tr>
       </thead>
@@ -87,7 +88,7 @@
       document.querySelector("#table-body").addEventListener("click", (e) => {
           const studentId = e.target.dataset.id;
           if (e.target.tagName === "BUTTON" && e.target.dataset.type === "view attendance") {
-              window.api.viewAttendance(studentId);
+            window.api.openAttendance(studentId);
           }
       });
       
